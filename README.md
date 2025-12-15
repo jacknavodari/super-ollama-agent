@@ -1,4 +1,5 @@
 # Portable Windows Ollama Agent
+if wix tools is installed you can make apps for windows with installer..
 
 The Portable Windows Ollama Agent is a self-contained AI assistant specifically designed to work in any directory without path confusion issues.
 
