@@ -120,7 +120,7 @@ class PortableWindowsAgent:
                 },
                 "config": {
                     "temperature": 0.0,
-                    "timeout": 300,
+                    "timeout": 600,
                     "stream": False
                 }
             },
