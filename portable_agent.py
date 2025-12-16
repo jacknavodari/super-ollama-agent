@@ -14,6 +14,8 @@ import subprocess
 import platform
 from datetime import datetime
 from pathlib import Path
+import base64
+import shutil
 
 
 # Self-contained tool definitions
@@ -26,6 +28,25 @@ def read_file(file_path):
             return f.read()
     except Exception as e:
         return f"Error reading file: {e}"
+
+def peek_file(file_path, num_lines=20):
+    """Reads the first few lines of a file."""
+    try:
+        if not os.path.exists(file_path):
+            return f"Error: File not found at '{file_path}'."
+            
+        lines = []
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for _ in range(num_lines):
+                line = f.readline()
+                if not line:
+                    break
+                lines.append(line)
+        
+        content = "".join(lines)
+        return f"First {len(lines)} lines of '{file_path}':\n{content}\n... (continuing)"
+    except Exception as e:
+        return f"Error peeking file: {e}"
 
 def write_file(file_path, content):
     """Writes content to a file. Creates directories if they don't exist."""
@@ -53,6 +74,157 @@ def execute_shell(command):
         return result.stdout if result.stdout else "Command executed successfully (no output)."
     except Exception as e:
         return f"Error executing command: {e}"
+
+def install_package(package_name):
+    """Installs a Python package using pip."""
+    try:
+        command = f"{sys.executable} -m pip install {package_name}"
+        result = subprocess.run(
+            command, 
+            shell=True, 
+            capture_output=True, 
+            text=True, 
+            check=False
+        )
+        if result.returncode != 0:
+            return f"Failed to install '{package_name}':\n{result.stderr}"
+        return f"Successfully installed '{package_name}':\n{result.stdout}"
+    except Exception as e:
+        return f"Error installing package: {e}"
+
+def copy_file(source_path, dest_path):
+    """Copies a file from source to destination."""
+    try:
+        if not os.path.exists(source_path):
+            return f"Error: Source file '{source_path}' does not exist."
+        
+        # Ensure destination directory exists
+        dest_dir = os.path.dirname(os.path.abspath(dest_path))
+        if dest_dir and not os.path.exists(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
+            
+        shutil.copy2(source_path, dest_path)
+        return f"Successfully copied '{source_path}' to '{dest_path}'."
+    except Exception as e:
+        return f"Error copying file: {e}"
+
+def analyze_image(image_path, prompt="Describe this image"):
+    """Analyzes an image using an Ollama vision model."""
+    
+    # Common vision models supported by Ollama
+    vision_models = ["llava", "bakllava", "moondream", "llama3.2-vision", "minicpm-v"]
+    
+    try:
+        if not os.path.exists(image_path):
+             return f"Error: Image file '{image_path}' not found."
+             
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+        url = "http://localhost:11434/api/generate" 
+        
+        # Determine which model to use
+        model = "llava" # Default fallback
+        try:
+            resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+            if resp.status_code == 200:
+                models = [m['name'] for m in resp.json().get('models', [])]
+                # Look for a vision model in the installed list
+                for vm in vision_models:
+                    matches = [m for m in models if vm in m]
+                    if matches:
+                        model = matches[0] # Use the specific installed version
+                        break
+        except:
+            pass
+
+        data = {
+            "model": model,
+            "prompt": prompt,
+            "images": [encoded_string],
+            "stream": False
+        }
+        
+        response = requests.post(url, json=data, timeout=60)
+        if response.status_code == 200:
+             return f"Image Analysis ({model}): {response.json().get('response', '')}"
+        else:
+             return f"Error analyzing image (Status {response.status_code}): {response.text}. Make sure you have a vision model like 'llava' installed."
+             
+    except Exception as e:
+        return f"Error analyzing image: {e}"
+
+def manage_todo(action, item=None, index=None):
+    """Manages a simple todo list using a JSON file."""
+    todo_file = "todo.json"
+    try:
+        if os.path.exists(todo_file):
+            try:
+                with open(todo_file, 'r') as f:
+                    todos = json.load(f)
+            except:
+                todos = []
+        else:
+            todos = []
+
+        if action == "list":
+            if not todos:
+                return "TODO list is empty."
+            result = "Current TODO List:\n"
+            for i, todo in enumerate(todos):
+                status = "[x]" if todo.get("completed") else "[ ]"
+                result += f"{i}. {status} {todo['text']}\n"
+            return result.strip()
+
+        elif action == "add":
+            if not item:
+                return "Error: 'item' is required for 'add' action."
+            todos.append({"text": item, "completed": False, "created_at": datetime.now().isoformat()})
+            with open(todo_file, 'w') as f:
+                json.dump(todos, f, indent=2)
+            return f"Added: '{item}'"
+
+        elif action == "complete":
+            if index is None:
+                try:
+                    index = int(item) if item and item.isdigit() else None
+                except:
+                    pass
+            
+            if index is None:
+                return "Error: 'index' is required for 'complete' action."
+                
+            if 0 <= index < len(todos):
+                todos[index]["completed"] = True
+                with open(todo_file, 'w') as f:
+                    json.dump(todos, f, indent=2)
+                return f"Completed item {index}: '{todos[index]['text']}'"
+            else:
+                return f"Error: Index {index} out of range."
+
+        elif action == "remove":
+            if index is None:
+                try:
+                    index = int(item) if item and item.isdigit() else None
+                except:
+                    pass
+
+            if index is None:
+                return "Error: 'index' is required for 'remove' action."
+                
+            if 0 <= index < len(todos):
+                removed = todos.pop(index)
+                with open(todo_file, 'w') as f:
+                    json.dump(todos, f, indent=2)
+                return f"Removed item {index}: '{removed['text']}'"
+            else:
+                return f"Error: Index {index} out of range."
+        
+        else:
+            return f"Error: Unknown action '{action}'"
+
+    except Exception as e:
+        return f"Error managing TODO list: {e}"
 
 TOOLS_AVAILABLE = True
 
@@ -145,13 +317,31 @@ class PortableWindowsAgent:
             "tools": [
                 {
                     "name": "read_file",
-                    "description": "Reads content from a local file in the current directory or specified path",
+                    "description": "Reads content from a local file. WARNING: Reads entire file. Use peek_file for large files.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "file_path": {
                                 "type": "string",
                                 "description": "Path to the file to read (relative to current directory or absolute path)"
+                            }
+                        },
+                        "required": ["file_path"]
+                    }
+                },
+                {
+                    "name": "peek_file",
+                    "description": "Reads the first few lines of a file. Use this for large files or quick checks.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Path to the file to peek"
+                            },
+                            "num_lines": {
+                                "type": "integer",
+                                "description": "Number of lines to read (default: 20)"
                             }
                         },
                         "required": ["file_path"]
@@ -229,6 +419,79 @@ class PortableWindowsAgent:
                             }
                         },
                         "required": ["path"]
+                    }
+                },
+                {
+                    "name": "manage_todo",
+                    "description": "Manage a TODO list (add, list, complete, remove items)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["add", "list", "complete", "remove"],
+                                "description": "Action to perform on the TODO list"
+                            },
+                            "item": {
+                                "type": "string",
+                                "description": "The TODO item content (required for 'add')"
+                            },
+                            "index": {
+                                "type": "integer",
+                                "description": "The index of the item (required for 'complete' or 'remove')"
+                            }
+                        },
+                        "required": ["action"]
+                    }
+                },
+                {
+                    "name": "install_package",
+                    "description": "Install a Python package using pip (DO NOT use for npm/node packages)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "package_name": {
+                                "type": "string",
+                                "description": "Name of the Python package to install"
+                            }
+                        },
+                        "required": ["package_name"]
+                    }
+                },
+                {
+                    "name": "copy_file",
+                    "description": "Copy a file from source to destination",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_path": {
+                                "type": "string",
+                                "description": "Path to the source file"
+                            },
+                            "dest_path": {
+                                "type": "string",
+                                "description": "Path to the destination file"
+                            }
+                        },
+                        "required": ["source_path", "dest_path"]
+                    }
+                },
+                {
+                    "name": "analyze_image",
+                    "description": "Analyze an image using a vision model (e.g. llava)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "image_path": {
+                                "type": "string",
+                                "description": "Path to the image file"
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "description": "Question or prompt about the image (default: 'Describe this image')"
+                            }
+                        },
+                        "required": ["image_path"]
                     }
                 }
             ],
@@ -387,6 +650,18 @@ If the user's request does not require a tool, provide a natural language respon
 - If you need to list directory contents, use the list_directory tool
 - When creating projects, ALWAYS create them in the current working directory or in a subdirectory of it
 - For complex operations involving multiple steps, break them down into smaller, manageable tasks
+- **EXISTING RESOURCE REUSE**:
+  - **CRITICAL**: Before creating NEW code files, ALWAYS check if there are existing files (HTML, Python, JS) in the current directory that match the user's request.
+  - If the user says "create an app from my html", LOOK for that HTML file first.
+  - **USE THE COPY TOOL**: If you find an existing file that should be part of a new project folder, use `copy_file` to move/copy it there. DO NOT rewrite it from scratch effectively ignoring the user's existing work.
+  - Check for existing `node_modules` or `venv` before attempting to install dependencies to save time.
+  - **OPTIMIZATION**: Avoid reading entire large files using `read_file` unless you absolutely need to analyze the full code. Use `peek_file` to check the header/structure, or just `copy_file` if you are moving it to a new project structure.
+
+- **PACKAGE MANAGEMENT RULES**:
+  - For **Python** packages: Use `install_package` tool (pip).
+  - For **Node.js/JavaScript** packages (electron, react, etc.): Use `execute_shell` with `npm install <package>`. NEVER use `install_package` for npm modules.
+  
+- **SELF-MANAGEMENT**: For complex tasks, use the 'manage_todo' tool to create a plan (add items) BEFORE starting work. Mark items as complete as you finish them. This keeps you organized.
 - When installing software, suggest using winget (Windows Package Manager) where available
 - REMEMBER: All operations happen in {self.working_dir} unless explicitly specified otherwise"""
 
@@ -508,6 +783,8 @@ If the user's request does not require a tool, provide a natural language respon
                              print(f"\n[Agent] Executing tool: {tool_name}...")
                              if tool_name == "read_file":
                                  tool_result = read_file(**tool_params)
+                             elif tool_name == "peek_file":
+                                 tool_result = peek_file(**tool_params)
                              elif tool_name == "write_file":
                                  tool_result = write_file(**tool_params)
                              elif tool_name == "execute_shell":
@@ -518,6 +795,14 @@ If the user's request does not require a tool, provide a natural language respon
                                  tool_result = self.list_directory(**tool_params)
                              elif tool_name == "check_file_exists":
                                  tool_result = self.check_file_exists(**tool_params)
+                             elif tool_name == "manage_todo":
+                                 tool_result = manage_todo(**tool_params)
+                             elif tool_name == "install_package":
+                                 tool_result = install_package(**tool_params)
+                             elif tool_name == "copy_file":
+                                 tool_result = copy_file(**tool_params)
+                             elif tool_name == "analyze_image":
+                                 tool_result = analyze_image(**tool_params)
                              else:
                                  tool_result = f"Error: Unknown tool '{tool_name}' requested."
                              
